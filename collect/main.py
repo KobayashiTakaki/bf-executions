@@ -53,7 +53,6 @@ if __name__ == '__main__':
         while True:
             executions = q.get()
             for e in executions:
-                print(e)
                 record = {
                     'measurement': 'executions',
                     'time': e['exec_date'],
@@ -66,5 +65,9 @@ if __name__ == '__main__':
                         'price': e['price']
                     }
                 }
-                write_api.write(bucket, org, record=record)
+                try:
+                    write_api.write(bucket, org, record=record)
+                except Exception as e:
+                    print(e)
+                    continue
             time.sleep(1)
