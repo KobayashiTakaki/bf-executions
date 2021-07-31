@@ -12,7 +12,9 @@ services:
     build:
       context: .
       dockerfile: ./collect/Dockerfile
-    env_file: ./collect/.env
+    env_file: .env
+    environment:
+      - INFLUXDB_URL=http://influxdb:8086
 
 volumes:
   influxdb_data:
