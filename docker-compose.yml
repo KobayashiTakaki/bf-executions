@@ -8,6 +8,12 @@ services:
     ports:
       - 8086:8086
 
+  collector:
+    build:
+      context: .
+      dockerfile: ./collect/Dockerfile
+    env_file: ./collect/.env
+
 volumes:
   influxdb_data:
     driver: local
