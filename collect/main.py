@@ -31,6 +31,9 @@ def fetch_executions(q):
             print('Error in requests: ', e)
             time.sleep(6)
             continue
+        if r.status_code != 200:
+            time.sleep(6)
+            continue
         executions = r.json()
         q.put(executions)
         ids = [e['id'] for e in executions]
