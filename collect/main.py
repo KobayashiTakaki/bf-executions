@@ -8,37 +8,41 @@ from influxdb_client import InfluxDBClient
 from influxdb_client.client.write_api import SYNCHRONOUS
 
 endpoint_url = 'https://api.bitflyer.com/'
-product_code = 'FX_BTC_JPY'
 org = 'takakisan.com'
 bucket = 'bf'
 load_dotenv(verbose=True)
+PRODUCT_CODES = [
+    'FX_BTC_JPY',
+    'BTC_JPY'
+]
 
 def fetch_executions(q):
-    payload = {
-        'product_code': product_code,
-        'count': 1000
-    }
-    last_id = 0
+    last_ids = { product_code: 0 for product_code in PRODUCT_CODES }
     while True:
-        if last_id != 0:
-            payload['after'] = last_id
-        try:
-            r = requests.get(
-                urllib.parse.urljoin(endpoint_url, '/v1/getexecutions'),
-                params=payload
-            )
-        except requests.exceptions.RequestException as e:
-            print('Error in requests: ', e)
-            time.sleep(6)
-            continue
-        if r.status_code != 200:
-            time.sleep(6)
-            continue
-        executions = r.json()
-        q.put(executions)
-        ids = [e['id'] for e in executions]
-        if len(ids) > 0:
-            last_id = max(ids)
+        for product_code in PRODUCT_CODES:
+            payload = {
+                'product_code': product_code,
+                'count': 1000
+            }
+            if last_ids[product_code] != 0:
+                payload['after'] = last_ids[product_code]
+            try:
+                r = requests.get(
+                    urllib.parse.urljoin(endpoint_url, '/v1/getexecutions'),
+                    params=payload
+                )
+            except requests.exceptions.RequestException as e:
+                print('Error in requests: ', e)
+                time.sleep(6)
+                continue
+            if r.status_code != 200:
+                time.sleep(6)
+                continue
+            executions = r.json()
+            q.put((product_code, executions))
+            ids = [e['id'] for e in executions]
+            if len(ids) > 0:
+                last_ids[product_code] = max(ids)
         time.sleep(6)
 
 def get_client():
@@ -54,7 +58,7 @@ if __name__ == '__main__':
     p.start()
     with client.write_api(write_options=SYNCHRONOUS) as write_api:
         while True:
-            executions = q.get()
+            product_code, executions = q.get()
             for e in executions:
                 record = {
                     'measurement': 'executions',
