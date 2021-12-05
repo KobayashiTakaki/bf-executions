@@ -7,6 +7,7 @@ services:
       - influxdb_data:/var/lib/influxdb2
     ports:
       - 8086:8086
+    restart: always
 
   collector:
     build:
@@ -15,6 +16,7 @@ services:
     env_file: .env
     environment:
       - INFLUXDB_URL=http://influxdb:8086
+    restart: always
 
 volumes:
   influxdb_data:
