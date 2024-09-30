@@ -21,7 +21,7 @@ func main() {
 		slog.Info("error in NewStorage", "error", err)
 		return
 	}
-	collector := application.NewCollector(st, bfclient)
+	collector := application.NewCollector(st, bfclient, application.OrderTypeDesc)
 	err = collector.Run(ctx, fromDate)
 	if err != nil {
 		slog.Info("error in Run", "error", err)
