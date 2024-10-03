@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -58,79 +57,30 @@ func NewStorage(outDir, fileName string) (*storage, error) {
 }
 
 func (s *storage) prepare() error {
-	// ファイルの存在確認
 	filePath := filepath.Join(s.OutDir, s.FileName)
-	_, err := os.Stat(filePath)
+	// ファイルが存在する場合は削除
+	err := os.Remove(filePath)
 	if err != nil {
 		// 想定していないエラー
 		if !os.IsNotExist(err) {
 			return err
 		}
-		// ファイルが存在しない場合は新規作成
-		f, err := os.Create(filePath)
-		if err != nil {
-			return err
-		}
-
-		// ヘッダー書き込み
-		err = writeHeader(f)
-		if err != nil {
-			return err
-		}
-
-		if err := f.Close(); err != nil {
-			return err
-		}
 	}
 
-	// ファイルの中身を読み込んで、最古のレコードを取得
-	f, err := os.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	rows, err := r.ReadAll()
+	// ファイル作成
+	f, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
 
-	for i, row := range rows {
-		if len(rows) < 2 {
-			break
-		}
+	// ヘッダー書き込み
+	err = writeHeader(f)
+	if err != nil {
+		return err
+	}
 
-		if i == 0 {
-			continue
-		}
-
-		if i == len(rows)-1 {
-			id, err := strconv.Atoi(row[0])
-			if err != nil {
-				return err
-			}
-			price, err := strconv.ParseFloat(row[2], 64)
-			if err != nil {
-				return err
-			}
-			size, err := strconv.ParseFloat(row[3], 64)
-			if err != nil {
-				return err
-			}
-			execDate, err := time.Parse(TIME_LAYOUT, row[4])
-			if err != nil {
-				return err
-			}
-
-			s.oldestExecution = &Execution{
-				ID:       id,
-				Side:     row[1],
-				Price:    price,
-				Size:     size,
-				ExecDate: execDate,
-			}
-		}
+	if err := f.Close(); err != nil {
+		return err
 	}
 
 	writer := NewMergeWriter()
