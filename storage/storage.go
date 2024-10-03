@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/csv"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 )
 
@@ -19,6 +20,7 @@ type Storage interface {
 	Standby(ctx context.Context)
 	Append(executions []*Execution) error
 	GetOldestExecution() *Execution
+	Reverse() error
 }
 
 var _ Storage = (*storage)(nil)
@@ -55,79 +57,30 @@ func NewStorage(outDir, fileName string) (*storage, error) {
 }
 
 func (s *storage) prepare() error {
-	// ファイルの存在確認
 	filePath := filepath.Join(s.OutDir, s.FileName)
-	_, err := os.Stat(filePath)
+	// ファイルが存在する場合は削除
+	err := os.Remove(filePath)
 	if err != nil {
 		// 想定していないエラー
 		if !os.IsNotExist(err) {
 			return err
 		}
-		// ファイルが存在しない場合は新規作成
-		f, err := os.Create(filePath)
-		if err != nil {
-			return err
-		}
-
-		// ヘッダー書き込み
-		err = writeHeader(f)
-		if err != nil {
-			return err
-		}
-
-		if err := f.Close(); err != nil {
-			return err
-		}
 	}
 
-	// ファイルの中身を読み込んで、最古のレコードを取得
-	f, err := os.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	r := csv.NewReader(f)
-	rows, err := r.ReadAll()
+	// ファイル作成
+	f, err := os.Create(filePath)
 	if err != nil {
 		return err
 	}
 
-	for i, row := range rows {
-		if len(rows) < 2 {
-			break
-		}
+	// ヘッダー書き込み
+	err = writeHeader(f)
+	if err != nil {
+		return err
+	}
 
-		if i == 0 {
-			continue
-		}
-
-		if i == len(rows)-1 {
-			id, err := strconv.Atoi(row[0])
-			if err != nil {
-				return err
-			}
-			price, err := strconv.ParseFloat(row[2], 64)
-			if err != nil {
-				return err
-			}
-			size, err := strconv.ParseFloat(row[3], 64)
-			if err != nil {
-				return err
-			}
-			execDate, err := time.Parse(TIME_LAYOUT, row[4])
-			if err != nil {
-				return err
-			}
-
-			s.oldestExecution = &Execution{
-				ID:       id,
-				Side:     row[1],
-				Price:    price,
-				Size:     size,
-				ExecDate: execDate,
-			}
-		}
+	if err := f.Close(); err != nil {
+		return err
 	}
 
 	writer := NewMergeWriter()
@@ -182,6 +135,138 @@ func (s *storage) Append(executions []*Execution) error {
 
 func (s *storage) GetOldestExecution() *Execution {
 	return s.oldestExecution
+}
+
+func (s *storage) Reverse() error {
+	filePath := filepath.Join(s.OutDir, s.FileName)
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	tmpFileName := s.FileName + ".tmp"
+	tmpFile, err := os.Create(filepath.Join(s.OutDir, tmpFileName))
+	r := csv.NewReader(f)
+	header, err := r.Read()
+	if err != nil {
+		return err
+	}
+	w := csv.NewWriter(tmpFile)
+	err = w.Write(header)
+	if err != nil {
+		return err
+	}
+	w.Flush()
+	err = tmpFile.Close()
+	if err != nil {
+		return err
+	}
+
+	const bufferSize = 1000
+
+	rows := make([][]string, 0, bufferSize)
+	for {
+		row, err := r.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		if len(rows) < bufferSize {
+			rows = append(rows, row)
+			continue
+		}
+		err = reverseAndPrepend(filepath.Join(s.OutDir, tmpFileName), rows)
+		rows = rows[:0]
+
+		if err != nil {
+			return err
+		}
+	}
+
+	if len(rows) > 0 {
+		err = reverseAndPrepend(filepath.Join(s.OutDir, tmpFileName), rows)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+
+	err = os.Rename(filepath.Join(s.OutDir, s.FileName), filepath.Join(s.OutDir, s.FileName+".bak"))
+	if err != nil {
+		return err
+	}
+	err = os.Rename(filepath.Join(s.OutDir, tmpFileName), filepath.Join(s.OutDir, s.FileName))
+	if err != nil {
+		return err
+	}
+	err = os.Remove(filepath.Join(s.OutDir, fmt.Sprintf("%s.bak", s.FileName)))
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func reverseAndPrepend(filePath string, rows [][]string) error {
+	bakFilePath := filePath + ".bak"
+	err := os.Rename(filePath, bakFilePath)
+	if err != nil {
+		return err
+	}
+
+	newFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		return err
+	}
+	bakFile, err := os.OpenFile(bakFilePath, os.O_RDONLY, 0666)
+	if err != nil {
+		return err
+	}
+
+	r := csv.NewReader(bakFile)
+	w := csv.NewWriter(newFile)
+
+	header, err := r.Read()
+	if err != nil {
+		return err
+	}
+	w.Write(header)
+	for i := len(rows) - 1; i >= 0; i-- {
+		w.Write(rows[i])
+	}
+	w.Flush()
+	for {
+		row, err := r.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return err
+		}
+		w.Write(row)
+	}
+	w.Flush()
+
+	err = bakFile.Close()
+	if err != nil {
+		return err
+	}
+	err = newFile.Close()
+	if err != nil {
+		return err
+	}
+	err = os.Remove(bakFilePath)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func writeHeader(f *os.File) error {
