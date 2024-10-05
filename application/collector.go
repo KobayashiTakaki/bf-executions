@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -56,6 +57,10 @@ func (c *Collector) Run(ctx context.Context, fromDate time.Time) error {
 			slog.Info("error in GetExecutions", "error", err)
 			return err
 		}
+		fmt.Printf(
+			"received data at %s\n",
+			executions[len(executions)-1].ExecDate.Format("2006-01-02 15:04:05.999999999"),
+		)
 		stExecutions := make([]*storage.Execution, 0, len(executions))
 		for _, e := range executions {
 			stExecutions = append(stExecutions, &storage.Execution{
